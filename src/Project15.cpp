@@ -9,6 +9,9 @@
 #define FRAME_DURATION 33
 #define NEOPIXEL_PIN 6
 #define LED_PIN 9
+#define V_SENSE_PIN A0
+#define LOW_VOLTAGE_TRIP 220
+#define LOW_VOLTAGE_TRIP_HYST 10
 #define SD_CS 10
 
 const uint8_t PROGMEM gamma8[] = {
@@ -34,6 +37,7 @@ File rootDir;
 char* animationFileName;
 unsigned int activeLeds = 0;
 unsigned int numFrames = 0;
+boolean lowVoltageDisable = false;
 
 File findAnimationFile(File dir){
   if(!dir.isDirectory()){
@@ -77,6 +81,7 @@ void listDir(File dir){
 void setup(){
   Serial.begin(BAUDRATE);
   strip.begin();
+  pinMode(LED_PIN,OUTPUT);
   Serial.println(F("Loading SD Card"));
   if(!SD.begin(SD_CS)){
     Serial.println(F("Unable to load SD card, is the SD card pluged in?"));
@@ -121,7 +126,6 @@ void setup(){
 }
 
 void loop(){
-
   File animationFile = SD.open(animationFileName,FILE_READ);
   //skip though the num frame and num led fields
   animationFile.read();
@@ -133,18 +137,29 @@ void loop(){
   byte blue;
   for(unsigned int frame = 0; frame < numFrames;frame ++){
     unsigned long timeStarted = millis();
+
+    if(analogRead(V_SENSE_PIN) <= LOW_VOLTAGE_TRIP){
+      lowVoltageDisable = true;
+    }else if(analogRead(V_SENSE_PIN) > (LOW_VOLTAGE_TRIP + LOW_VOLTAGE_TRIP_HYST)){
+      lowVoltageDisable = false;
+    }
+    digitalWrite(LED_PIN, HIGH);
     for(unsigned int led = 0; led < activeLeds; led++){
       red = animationFile.read();
       green = animationFile.read();
       blue = animationFile.read();
       if(led < NUMLEDS){
-        strip.setPixelColor(led, pgm_read_byte(&gamma8[red]),
-                                 pgm_read_byte(&gamma8[green]),
-                                 pgm_read_byte(&gamma8[blue]));
-        //Serial.println(led);
+        if(lowVoltageDisable){
+          strip.setPixelColor(led, 0, 0, 0);
+        }else{
+          strip.setPixelColor(led, pgm_read_byte(&gamma8[red]),
+                                   pgm_read_byte(&gamma8[green]),
+                                   pgm_read_byte(&gamma8[blue]));
+        }
       }
     }
     strip.show();
+    digitalWrite(LED_PIN, LOW);
     while((millis() - timeStarted) < FRAME_DURATION); //wait for fram time to end
   }
   animationFile.close();
