@@ -5,14 +5,14 @@
 #include <Adafruit_NeoPixel.h>
 
 #define BAUDRATE 115200
-#define NUMLEDS 150
+#define NUMLEDS 300
 #define FRAME_DURATION 33
-#define NEOPIXEL_PIN 6
-#define LED_PIN 9
+#define NEOPIXEL_PIN 13
+#define LED_PIN 5
 #define V_SENSE_PIN A0
 #define LOW_VOLTAGE_TRIP 220
 #define LOW_VOLTAGE_TRIP_HYST 10
-#define SD_CS 10
+#define SD_CS 6
 
 const uint8_t PROGMEM gamma8[] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -35,6 +35,7 @@ const uint8_t PROGMEM gamma8[] = {
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMLEDS,NEOPIXEL_PIN,NEO_GRB);
 File rootDir;
 char* animationFileName;
+File animationFile;
 unsigned int activeLeds = 0;
 unsigned int numFrames = 0;
 boolean lowVoltageDisable = false;
@@ -79,6 +80,7 @@ void listDir(File dir){
 }
 
 void setup(){
+  delay(5000);
   Serial.begin(BAUDRATE);
   strip.begin();
   pinMode(LED_PIN,OUTPUT);
@@ -89,9 +91,9 @@ void setup(){
     while(true); //halt
   }
   Serial.println(F("SD card Loaded."));
-  rootDir = SD.open(F("/"));
+  rootDir = SD.open("/");
   Serial.println(F("Serching root for animation files..."));
-  File animationFile = findAnimationFile(rootDir);
+  animationFile = findAnimationFile(rootDir);
   if(!animationFile){
     Serial.println(F("Unable to find animation file."));
     Serial.println(F("Program will halt."));
@@ -121,17 +123,12 @@ void setup(){
   activeLeds = animationNumLeds;
   numFrames = animationNumFrames;
   animationFileName = animationFile.name();
-  animationFile.close();
+  rootDir.close();
   Serial.println("Setup complete, animation will start.");
 }
 
 void loop(){
-  File animationFile = SD.open(animationFileName,FILE_READ);
-  //skip though the num frame and num led fields
-  animationFile.read();
-  animationFile.read();
-  animationFile.read();
-  animationFile.read();
+  animationFile.seek(3u);
   byte red;
   byte green;
   byte blue;
@@ -148,6 +145,7 @@ void loop(){
       red = animationFile.read();
       green = animationFile.read();
       blue = animationFile.read();
+
       if(led < NUMLEDS){
         if(lowVoltageDisable){
           strip.setPixelColor(led, 0, 0, 0);
@@ -162,5 +160,4 @@ void loop(){
     digitalWrite(LED_PIN, LOW);
     while((millis() - timeStarted) < FRAME_DURATION); //wait for fram time to end
   }
-  animationFile.close();
 }
