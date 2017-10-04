@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <avr/pgmspace.h>
-#include <SD.h>
+#include <SdFat.h>
 #include <SPI.h>
 #include <Adafruit_NeoPixel.h>
 
@@ -33,8 +33,9 @@ const uint8_t PROGMEM gamma8[] = {
   215,218,220,223,225,228,231,233,236,239,241,244,247,249,252,255 };
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMLEDS,NEOPIXEL_PIN,NEO_GRB);
+SdFat SD;
 File rootDir;
-char* animationFileName;
+const char* animationFileName;
 File animationFile;
 unsigned int activeLeds = 0;
 unsigned int numFrames = 0;
@@ -85,7 +86,7 @@ void setup(){
   strip.begin();
   pinMode(LED_PIN,OUTPUT);
   Serial.println(F("Loading SD Card"));
-  if(!SD.begin(SD_CS)){
+  if(!SD.begin(SD_CS,SPI_FULL_SPEED)){
     Serial.println(F("Unable to load SD card, is the SD card pluged in?"));
     Serial.println(F("Program will halt."));
     while(true); //halt
@@ -93,7 +94,7 @@ void setup(){
   Serial.println(F("SD card Loaded."));
   rootDir = SD.open("/");
   Serial.println(F("Serching root for animation files..."));
-  animationFile = findAnimationFile(rootDir);
+  animationFile = SD.open("/A00.LAF");//findAnimationFile(rootDir);
   if(!animationFile){
     Serial.println(F("Unable to find animation file."));
     Serial.println(F("Program will halt."));
