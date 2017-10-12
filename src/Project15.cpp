@@ -1,7 +1,6 @@
 #include <Arduino.h>
-#include <avr/pgmspace.h>
 #include <SdFat.h>
-#include <SPI.h>
+#include <SDUtilites.h>
 #include <Adafruit_NeoPixel.h>
 
 #define BAUDRATE 115200
@@ -13,6 +12,9 @@
 #define LOW_VOLTAGE_TRIP 220
 #define LOW_VOLTAGE_TRIP_HYST 10
 #define SD_CS 6
+
+#define NO_SD 0
+#define RUNING 1
 
 const uint8_t PROGMEM gamma8[] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -35,130 +37,99 @@ const uint8_t PROGMEM gamma8[] = {
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUMLEDS,NEOPIXEL_PIN,NEO_GRB);
 SdFat SD;
 File rootDir;
-const char* animationFileName;
+char animationFileName[13];
 File animationFile;
 unsigned int activeLeds = 0;
 unsigned int numFrames = 0;
 boolean lowVoltageDisable = false;
-
-File findAnimationFile(File dir){
-  if(!dir.isDirectory()){
-    return File();
-  }
-  File currentFile;
-  while(true){
-    currentFile = dir.openNextFile();
-    if(!currentFile){
-      return File();
-    }
-    String currentFileName = String(currentFile.name());
-    if(currentFileName.endsWith(".LAF")){
-      return currentFile;
-    }
-    currentFile.close();
-  }
-}
-
-void listDir(File dir){
-  unsigned int numFiles = 0;
-  if(dir.isDirectory()){
-    File currentFile;
-    while(true){
-      currentFile = dir.openNextFile();
-      if(! currentFile){
-        break;
-      }
-      if(!currentFile.isDirectory()){
-        Serial.println(currentFile.name());
-        numFiles++;
-      }
-      currentFile.close();
-    }
-  }
-  Serial.print(F("Found "));
-  Serial.print(numFiles);
-  Serial.println(F(" Files"));
-}
+uint8_t opState = 0;
 
 void setup(){
-  delay(5000);
   Serial.begin(BAUDRATE);
   strip.begin();
   pinMode(LED_PIN,OUTPUT);
-  Serial.println(F("Loading SD Card"));
-  if(!SD.begin(SD_CS,SPI_FULL_SPEED)){
-    Serial.println(F("Unable to load SD card, is the SD card pluged in?"));
-    Serial.println(F("Program will halt."));
-    while(true); //halt
-  }
-  Serial.println(F("SD card Loaded."));
-  rootDir = SD.open("/");
-  Serial.println(F("Serching root for animation files..."));
-  animationFile = SD.open("/A00.LAF");//findAnimationFile(rootDir);
-  if(!animationFile){
-    Serial.println(F("Unable to find animation file."));
-    Serial.println(F("Program will halt."));
-    while(true); //halt
-  }
-  Serial.print(F("Found animation file "));
-  Serial.println(animationFile.name());
-  unsigned int animationNumLeds = ((unsigned int)animationFile.read())<<8;
-  animationNumLeds += animationFile.read();
-  unsigned int animationNumFrames = ((unsigned int)animationFile.read())<<8;
-  animationNumFrames += animationFile.read();
-  Serial.print(F("Animation contains "));
-  Serial.print(animationNumFrames);
-  Serial.print(F(" frames at "));
-  Serial.print(animationNumLeds);
-  Serial.println(F(" LEDs"));
-  unsigned long expectedSize = animationNumLeds*animationNumFrames*3+4;
-  Serial.print(F("Checking file size, Expects "));
-  Serial.print(expectedSize);
-  Serial.println(F(" bytes."));
-  if(expectedSize > animationFile.size()){
-    Serial.println(F("Size check failed."));
-    Serial.println(F("Program will halt."));
-    while(true); //halt
-  }
-  Serial.println(F("Size check passed"));
-  activeLeds = animationNumLeds;
-  numFrames = animationNumFrames;
-  animationFileName = animationFile.name();
-  rootDir.close();
-  Serial.println("Setup complete, animation will start.");
+
+
 }
 
 void loop(){
-  animationFile.seek(3u);
-  byte red;
-  byte green;
-  byte blue;
-  for(unsigned int frame = 0; frame < numFrames;frame ++){
-    unsigned long timeStarted = millis();
-
-    if(analogRead(V_SENSE_PIN) <= LOW_VOLTAGE_TRIP){
-      lowVoltageDisable = true;
-    }else if(analogRead(V_SENSE_PIN) > (LOW_VOLTAGE_TRIP + LOW_VOLTAGE_TRIP_HYST)){
-      lowVoltageDisable = false;
+  switch(opState){
+  case NO_SD:{
+    delay(5000);
+    Serial.println(F("Loading SD Card"));
+    if(!SD.begin(SD_CS,SPI_FULL_SPEED)){
+      Serial.println(F("Unable to load SD card, is the SD card pluged in?"));
+      return;
     }
-    digitalWrite(LED_PIN, HIGH);
-    for(unsigned int led = 0; led < activeLeds; led++){
-      red = animationFile.read();
-      green = animationFile.read();
-      blue = animationFile.read();
+    Serial.println(F("SD card Loaded."));
+    rootDir = SD.open("/");
+    Serial.println(F("Serching root for animation files..."));
+    animationFile = findAnimationFile(SD,"/");
+    if(!animationFile){
+      Serial.println(F("Unable to find animation file."));
+      return;
+    }
+    animationFile.getName(animationFileName,13);
+    animationFile.close();
+    Serial.print(F("Found animation file "));
+    Serial.println(animationFileName);
+    AnimationConfig config = getAnimationConfig(SD,animationFileName);
+    if(config.numFrames == 0 || config.numLed == 0){
+      Serial.println(F("Invalid Animation File!"));
+      return;
+    }
+    Serial.print(F("Animation contains "));
+    Serial.print(config.numFrames);
+    Serial.print(F(" frames at "));
+    Serial.print(config.numLed);
+    Serial.println(F(" LEDs"));
+    if(config.numLed > NUMLEDS){
+      activeLeds = NUMLEDS;
+    }else{
+      activeLeds = config.numLed;
+    }
+    numFrames = config.numFrames;
+    rootDir.close();
+    Serial.println("Setup complete, animation will start.");
+    opState = RUNING;
+    break;
+  }
+  case RUNING:{
+    animationFile = SD.open(animationFileName);
+    animationFile.seek(3u);
+    byte red;
+    byte green;
+    byte blue;
+    for(unsigned int frame = 0; frame < numFrames;frame ++){
+      unsigned long timeStarted = millis();
 
-      if(led < NUMLEDS){
-        if(lowVoltageDisable){
-          strip.setPixelColor(led, 0, 0, 0);
-        }else{
-          strip.setPixelColor(led, pgm_read_byte(&gamma8[red]),
-                                   pgm_read_byte(&gamma8[green]),
-                                   pgm_read_byte(&gamma8[blue]));
+      if(analogRead(V_SENSE_PIN) <= LOW_VOLTAGE_TRIP){
+        lowVoltageDisable = true;
+      }else if(analogRead(V_SENSE_PIN) > (LOW_VOLTAGE_TRIP + LOW_VOLTAGE_TRIP_HYST)){
+        lowVoltageDisable = false;
+      }
+      digitalWrite(LED_PIN, HIGH);
+      for(unsigned int led = 0; led < activeLeds; led++){
+        red = animationFile.read();
+        green = animationFile.read();
+        blue = animationFile.read();
+
+        if(led < NUMLEDS){
+          if(lowVoltageDisable){
+            strip.setPixelColor(led, 0, 0, 0);
+          }else{
+            strip.setPixelColor(led, pgm_read_byte(&gamma8[red]),
+                                    pgm_read_byte(&gamma8[green]),
+                                    pgm_read_byte(&gamma8[blue]));
+          }
         }
       }
+      strip.show();
+      digitalWrite(LED_PIN, LOW);
+      while((millis() - timeStarted) < FRAME_DURATION); //wait for fram time to end
     }
-    strip.show();
-    digitalWrite(LED_PIN, LOW);
-    while((millis() - timeStarted) < FRAME_DURATION); //wait for fram time to end
+    animationFile.close();
+    break;
+  }
   }
 }
